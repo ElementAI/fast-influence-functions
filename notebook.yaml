@@ -1,0 +1,19 @@
+preemptable: true
+restartable: true  # if not using shuriken, the job will restart with from a new checkpoint
+
+#environmentVars:
+#  - PWD=/eai
+
+resources:
+  mem: 24
+  cpu: 1
+  gpu: 1
+
+data:
+  - eai.lizard_muffin.orlando:/output:rw
+  - eai.lizard_muffin.data@latest:/data:rw
+
+command:
+  - bash
+  - -c
+  - jupyter notebook --ip=0.0.0.0 --port=8080 --no-browser --NotebookApp.token='' --NotebookApp.custom_display_url=https://${EAI_JOB_ID}.job.console.elementai.com --NotebookApp.disable_check_xsrf=True --NotebookApp.allow_origin='*' --notebook-dir /output

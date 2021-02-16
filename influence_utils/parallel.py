@@ -5,6 +5,7 @@
 
 import os
 import sys
+from pathlib import Path
 import torch
 import tempfile
 import numpy as np
@@ -120,11 +121,13 @@ def compute_s_test_and_influence(
 
     if log_stdin_and_stdout is True:
         logdir = "./logs"
-        if not os.path.isdir(logdir):
+        if not Path(logdir).exists():
             os.mkdir(logdir)
         # https://stackoverflow.com/questions/1501651/log-output-of-multiprocessing-process
         sys.stdout = open(os.path.join(logdir, f"mp.{os.getpid()}.out"), "a")
         sys.stderr = open(os.path.join(logdir, f"mp.{os.getpid()}.err"), "a")
+
+    print(f"In parallel computation using gpu {rank}")
 
     # Approx. 4-5sec for moving model to a specified GPU
     model.to(devices[rank])
