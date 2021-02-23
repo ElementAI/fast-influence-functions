@@ -1,5 +1,6 @@
+datasets
 jupyterlab
-transformers==3.0.2
+transformers
 wandb
 scikit-learn
 matplotlib

@@ -1,9 +1,6 @@
 preemptable: true
 restartable: true  # if not using shuriken, the job will restart with from a new checkpoint
 
-#environmentVars:
-#  - PWD=/eai
-
 resources:
   mem: 24
   cpu: 1
@@ -11,7 +8,7 @@ resources:
 
 data:
   - eai.lizard_muffin.orlando:/output:rw
-  - eai.lizard_muffin.data@latest:/data:rw
+  - eai.baal.xai_caps_shr:/share:rw
 
 command:
   - bash
