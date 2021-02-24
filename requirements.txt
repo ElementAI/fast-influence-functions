@@ -11,3 +11,7 @@ yagmail[all]
 scp
 streamlit
 pycairo
+eai-distributed-toolkit
+Flask
+flask_cors
+datasets

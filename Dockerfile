@@ -1,6 +1,7 @@
 # syntax = docker/dockerfile:1.0-experimental
 FROM pytorch/pytorch:1.5.1-cuda10.1-cudnn7-runtime
 
+ARG PIP_EXTRA_INDEX_URL
 # working directory
 WORKDIR /workspace
 
@@ -100,3 +101,4 @@ ENTRYPOINT []
 
 # load bash
 CMD /bin/bash
+ENV PYTHONPATH='/workspace/fast-influence-functions'

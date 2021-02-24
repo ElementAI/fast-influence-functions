@@ -1,0 +1,12 @@
+image: registry.console.elementai.com/eai.baal/dask_fast_if
+isProcessAgent: true
+preemptable: true
+restartable: true
+command: ['sh', '-c', 'python fast-influence-functions/performance/dask_map.py']
+resources:
+  cpu: 4
+  mem: 64
+data:
+  - "6a479d19-1497-454b-b7e0-8656763d6c92:/scheduler_info:rw"
+  - "e33b222a-a25d-4aae-99eb-aaabd3954da3:/cifar:ro"
+  - "94306aaf-f854-4576-93da-9785bd8cd441:/xai_caps_shr:rw"
