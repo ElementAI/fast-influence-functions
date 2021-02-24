@@ -1,0 +1,16 @@
+preemptable: true
+restartable: true  # if not using shuriken, the job will restart with from a new checkpoint
+
+resources:
+    cpu: 1
+    mem: 24
+    gpu: 1
+    gpuMem: 12
+
+data:
+  - eai.lizard_muffin.orlando:/output:rw
+  - eai.baal.xai_caps_shr:/share:rw
+
+command:
+  - python
+  - /workspace/fast-influence-functions/compute_influences.py

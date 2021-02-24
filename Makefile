@@ -3,6 +3,7 @@ USERNAME := $(shell whoami 2> /dev/null)
 USERNAME := $(or $(USERNAME),$(USERNAME),nobody) 
 JOBYAML_TRAIN=train.yaml
 JOBYAML_NOTEBOOK=notebook.yaml
+JOBYAML_INFLUENCES=influences.yaml
 # By default this deploys to the users default account
 # By commenting the line below and uncommenting the line
 # after it, you can deploy to the eai.lizard_muffin account instead
@@ -38,6 +39,11 @@ push: tag
 .PHONY: toolkit-train
 toolkit-train: push
 	eai job submit -i $(DEMO_IMAGE_TAG) -f $(JOBYAML_TRAIN) --account $(TOOLKIT_ACCOUNT_NAME)
+	eai job logs -f
+
+.PHONY: toolkit-influences
+toolkit-influences: push
+	eai job submit -i $(DEMO_IMAGE_TAG) -f $(JOBYAML_INFLUENCES) --account $(TOOLKIT_ACCOUNT_NAME)
 	eai job logs -f
 
 .PHONY: toolkit-notebook

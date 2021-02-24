@@ -3,28 +3,39 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # For full license text, see the LICENSE file in the repo root or https://opensource.org/licenses/BSD-3-Clause
 
-from transformers import BertForSequenceClassification
+from typing import Union
+from transformers import BertForSequenceClassification, DistilBertForSequenceClassification
 
 
-def freeze_BERT_parameters(model: BertForSequenceClassification, verbose: bool = True) -> None:
+def freeze_BERT_parameters(model: Union[BertForSequenceClassification, DistilBertForSequenceClassification], verbose: bool = True) -> None:
     # https://github.com/huggingface/transformers/issues/400
-    if not isinstance(model, BertForSequenceClassification):
+    if not isinstance(model, BertForSequenceClassification) and not isinstance(model, DistilBertForSequenceClassification):
         raise TypeError
 
-    # Table 3 in https://arxiv.org/pdf/1911.03090.pdf
-    params_to_freeze = [
-        "bert.embeddings.",
-        "bert.encoder.layer.0.",
-        "bert.encoder.layer.1.",
-        "bert.encoder.layer.2.",
-        "bert.encoder.layer.3.",
-        "bert.encoder.layer.4.",
-        "bert.encoder.layer.5.",
-        "bert.encoder.layer.6.",
-        "bert.encoder.layer.7.",
-        "bert.encoder.layer.8.",
-        "bert.encoder.layer.9.",
-    ]
+    if isinstance(model, BertForSequenceClassification):
+        # Table 3 in https://arxiv.org/pdf/1911.03090.pdf
+        params_to_freeze = [
+            "bert.embeddings.",
+            "bert.encoder.layer.0.",
+            "bert.encoder.layer.1.",
+            "bert.encoder.layer.2.",
+            "bert.encoder.layer.3.",
+            "bert.encoder.layer.4.",
+            "bert.encoder.layer.5.",
+            "bert.encoder.layer.6.",
+            "bert.encoder.layer.7.",
+            "bert.encoder.layer.8.",
+            "bert.encoder.layer.9.",
+        ]
+    else:
+        params_to_freeze = [
+            "distilbert.embeddings.",
+            "distilbert.transformer.layer.0.",
+            "distilbert.transformer.layer.1.",
+            "distilbert.transformer.layer.2.",
+            "distilbert.transformer.layer.3.",
+        ]
+
     for name, param in model.named_parameters():
         # if "classifier" not in name:  # classifier layer
         #     param.requires_grad = False
