@@ -1,4 +1,5 @@
 import pickle
+import time
 from functools import reduce
 from pathlib import Path
 from typing import Any, Dict, List
@@ -6,7 +7,6 @@ from typing import Any, Dict, List
 import numpy as np
 import torch
 from datasets import load_dataset
-from distributed import wait
 from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.sampler import SequentialSampler, RandomSampler
 from tqdm import tqdm
@@ -124,8 +124,8 @@ def get_influences_inner(indices, params_filter, weight_decay_ignores, s_test_ex
     model.eval()
     s_test_example = [s.cuda() for s in s_test_example]
     influences = {}
-
-    for index, train_inputs in enumerate(tqdm(train_instance_loader)):
+    assert len(indices) == len(train_instance_loader), "Needs batch-size=1."
+    for index, train_inputs in zip(indices, train_instance_loader):
         grad_z = nn_influence_utils.compute_gradients(
             n_gpu=1,
             device=model.device,
@@ -222,7 +222,7 @@ def main():
 
     # Iterate through every example in the validation set
     # Compute influences for every incorrect prediction
-    for idx, inputs in tqdm(enumerate(val_loader), desc="Val set"):
+    for idx, inputs in tqdm(enumerate(val_loader), desc="Val set", total=len(val_loader)):
         label = inputs.pop("labels")
 
         for k, v in inputs.items():
@@ -236,11 +236,12 @@ def main():
             # Put the label back as we needed for gradient calculation
             inputs["labels"] = label
 
-            print(f"Computing influences for index {idx}")
+            print(f"Computing influences for index {idx}...", end=' ')
+            s = time.time()
             s_test = compute_s_test(test_inputs=inputs, params_filter=params_filter,
                                     weight_decay_ignores=weight_decay_ignores, dataset_len=dataset_len, client=client)
             results[idx] = get_influences(params_filter, weight_decay_ignores, s_test, dataset_len, client)
-
+            print(f"Took {time.time() - s} seconds")
             # save results so far
             with open(RESULTS_FILE_PATH, "wb") as f:
                 pickle.dump(results, f)
