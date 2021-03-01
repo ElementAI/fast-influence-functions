@@ -1,15 +1,18 @@
+image: registry.console.elementai.com/eai.baal/dask_fast_if
+
 preemptable: true
 restartable: true  # if not using shuriken, the job will restart with from a new checkpoint
+isProcessAgent: true
 
 resources:
     cpu: 1
     mem: 24
     gpu: 1
-    gpuMem: 12
 
 data:
-  - eai.lizard_muffin.orlando:/output:rw
-  - eai.baal.xai_caps_shr:/share:rw
+  - "6a479d19-1497-454b-b7e0-8656763d6c92:/scheduler_info:rw"
+  - "e33b222a-a25d-4aae-99eb-aaabd3954da3:/cifar:ro"
+  - "94306aaf-f854-4576-93da-9785bd8cd441:/share:rw"
 
 command:
   - python
