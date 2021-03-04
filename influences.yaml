@@ -1,5 +1,4 @@
 image: registry.console.elementai.com/eai.baal/dask_fast_if
-
 preemptable: true
 restartable: true  # if not using shuriken, the job will restart with from a new checkpoint
 isProcessAgent: true
@@ -17,3 +16,9 @@ data:
 command:
   - python
   - /workspace/fast-influence-functions/compute_influences.py
+  - --K
+  - 1000
+  - --faiss_path
+  - /share/sst2-faiss_index
+  - --workers
+  - 4

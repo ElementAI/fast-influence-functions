@@ -124,7 +124,7 @@ def wait_for_cluster(cluster, num_expected):
         # TODO Rework this loop
         num_workers = len(cluster._list_workers().running)
         while num_workers < num_expected:
-            print(f"Waiting for cluster to start: {num_workers} online.")
+            print(f"Waiting for cluster to start: {num_workers}/{num_expected} online.")
             time.sleep(5)
             num_workers = len(cluster._list_workers().running)
 

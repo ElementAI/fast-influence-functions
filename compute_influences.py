@@ -1,8 +1,9 @@
+import argparse
 import pickle
 import time
 from functools import reduce
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Iterable, Optional
 
 import numpy as np
 import torch
@@ -13,11 +14,11 @@ from tqdm import tqdm
 from transformers.data.data_collator import default_data_collator, DataCollatorWithPadding
 
 from experiments import misc_utils
-from influence_utils import nn_influence_utils
+from influence_utils import nn_influence_utils, faiss_utils
 from performance.dask_map import get_client, wait_for_cluster
 
 MODEL_CKPT = "/share/sst2-checkpoint"
-RESULTS_FILE_PATH = "/tmp/sst-2-influences-caching.pkl"
+RESULTS_FILE_PATH = "/share/sst-2-influences-caching.pkl"
 WEIGHT_DECAY = 0.005  # same as used during training
 S_TEST_DAMP = 5e-3
 S_TEST_SCALE = 1e4
@@ -29,7 +30,25 @@ NUM_WORKERS = 4
 S_TEST_NUM_SAMPLES = 500
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--K', type=int, default=-1, help="Number of neighbours to use for IF. -1 means no KNN")
+    parser.add_argument('--workers', type=int, default=0, help="Number of dask workers to spawn. 0 means no workers")
+    parser.add_argument('--faiss_path', type=str, default=None, help="Path to load the faiss index.")
+    return parser.parse_args()
+
+
 def get_train_dataset(tokenizer, indices=None):
+    """
+    Get a train dataset.
+    Args:
+        tokenizer: Tokenizer to use in the preprocessing.
+        indices: List of indices to select. optional
+
+    Returns:
+        a dataset
+    """
+
     def preprocess_function(examples):
         # Do not do padding here, but do it when the dataloader creates batches
         return tokenizer(examples["sentence"],
@@ -49,18 +68,20 @@ def get_train_dataset(tokenizer, indices=None):
     return train_dataset
 
 
-def compute_s_test(test_inputs, params_filter, weight_decay_ignores, dataset_len, client) -> torch.Tensor:
+def compute_s_test(test_inputs, params_filter, weight_decay_ignores, dataset_len, client, num_workers) -> torch.Tensor:
     assert len(
         test_inputs) == 3 and "input_ids" in test_inputs and "attention_mask" in test_inputs and "labels" in test_inputs
 
     splitted = np.array_split(np.arange(dataset_len), NUM_WORKERS)
     fut = client.map(compute_s_test_inner, splitted, test_inputs=test_inputs,
-                     params_filter=params_filter, weight_decay_ignores=weight_decay_ignores, pure=False)
+                     params_filter=params_filter, weight_decay_ignores=weight_decay_ignores,
+                     num_workers=num_workers, pure=False)
     results = client.gather(fut)
     return reduce(update_s_test, results[1:], results[0])
 
 
-def compute_s_test_inner(indices, test_inputs, params_filter, weight_decay_ignores):
+def compute_s_test_inner(indices, test_inputs, params_filter, weight_decay_ignores, num_workers):
+    """Function to be sent to the workers, should not be called directly."""
     tokenizer, model = misc_utils.create_tokenizer_and_model(MODEL_CKPT)
     train_dataset = get_train_dataset(tokenizer, indices)
     train_loader = get_train_loader(train_dataset, tokenizer, random=True)
@@ -84,7 +105,7 @@ def compute_s_test_inner(indices, test_inputs, params_filter, weight_decay_ignor
             weight_decay=WEIGHT_DECAY,
             damp=S_TEST_DAMP,
             scale=S_TEST_SCALE,
-            num_samples=S_TEST_NUM_SAMPLES // NUM_WORKERS)
+            num_samples=S_TEST_NUM_SAMPLES // num_workers)
 
         # Sum the values across runs
         if s_test is None:
@@ -102,14 +123,28 @@ def update_s_test(_s_test, s_test):
     ]
 
 
-def get_influences(params_filter, weight_decay_ignores, s_test_example, dataset_len, client):
+def get_influences(params_filter, weight_decay_ignores, s_test_example, closest_indices, client, workers):
+    """
+    Get the influence of the neighbhors on the test example's prediction.
+    Args:
+        params_filter: Which params to freeze.
+        weight_decay_ignores: ...
+        s_test_example: s_test for the test example.
+        closest_indices: indices of the closest examples.
+        client: Dask client connected to the cluster.
+        workers: Number of workers in the cluster. TODO Can be infered from the client I think.
+
+    Returns:
+        Influence for each indice.
+    """
+
     def mergedict(args):
         output = {}
         for arg in args:
             output.update(arg)
         return output
 
-    splitted = np.array_split(np.arange(dataset_len), NUM_WORKERS)
+    splitted = np.array_split(closest_indices, workers)
     fut = client.map(get_influences_inner, splitted, s_test_example=s_test_example,
                      params_filter=params_filter, weight_decay_ignores=weight_decay_ignores, pure=False)
     results = client.gather(fut)
@@ -117,6 +152,7 @@ def get_influences(params_filter, weight_decay_ignores, s_test_example, dataset_
 
 
 def get_influences_inner(indices, params_filter, weight_decay_ignores, s_test_example):
+    """Function to be sent to the workers. Should not be called directly."""
     tokenizer, model = misc_utils.create_tokenizer_and_model(MODEL_CKPT)
     train_dataset = get_train_dataset(tokenizer, indices)
     train_instance_loader = get_train_loader(train_dataset, tokenizer, random=False)
@@ -155,7 +191,17 @@ def custom_collator(features: List[Any]) -> Dict[str, torch.Tensor]:
     return input_dict
 
 
-def get_train_loader(train_dataset, tokenizer, random=False):
+def get_train_loader(train_dataset: 'Dataset', tokenizer: 'Tokenizer', random=False) -> DataLoader:
+    """
+    Return a DataLoader for the train dataset.
+    Args:
+        train_dataset: Initial training dataset
+        tokenizer: Tokenizer to use on the examples.
+        random: Wheter to use a Sequentialsampler of random.
+
+    Returns:
+        a DataLoader.
+    """
     train_collator = DataCollatorWithPadding(tokenizer, padding=True)
     if random:
         train_loader = DataLoader(dataset=train_dataset,
@@ -170,9 +216,25 @@ def get_train_loader(train_dataset, tokenizer, random=False):
     return train_loader
 
 
-def main():
-    client, cluster = get_client(NUM_WORKERS, '/scheduler_info')
-    wait_for_cluster(cluster, NUM_WORKERS)
+def maybe_load_faiss(faiss_path: str) -> faiss_utils.FAISSIndex:
+    """
+    Will try to load the faiss index if the path is not None.
+    Args:
+        faiss_path: path to the faiss index.
+
+    Returns:
+        Optional[FAISSIndex], a FAISS object.
+    """
+    if faiss_path is None:
+        return faiss_path
+    faiss_index = faiss_utils.FAISSIndex(768, "Flat")
+    faiss_index.load(faiss_path)
+    return faiss_index
+
+
+def main(args):
+    client, cluster = get_client(args.workers, '/scheduler_info')
+    wait_for_cluster(cluster, args.workers)
 
     tokenizer, model = misc_utils.create_tokenizer_and_model(MODEL_CKPT)
 
@@ -197,6 +259,8 @@ def main():
         preprocess_function,
         batched=True,
         remove_columns=["idx", "sentence"])
+    # The CLS index will be the same throughout
+    cls_idx = train_dataset[0]["input_ids"].index(tokenizer.cls_token_id)
     dataset_len = len(train_dataset)
 
     # Setup needed parameters
@@ -212,6 +276,8 @@ def main():
 
     model.cuda()
     model.eval()
+
+    faiss_index = maybe_load_faiss(args.faiss_path)
 
     # Load results so far
     if Path(RESULTS_FILE_PATH).exists():
@@ -233,14 +299,18 @@ def main():
 
         # Only get influences for those examples not already processed
         if not pred_correct and idx not in results:
+            embedding = model.distilbert(**inputs)[0][:, cls_idx, :].cpu().detach().numpy()
+            closest_indices = get_closest(embedding, train_dataset, args.K, faiss_index)
             # Put the label back as we needed for gradient calculation
             inputs["labels"] = label
 
             print(f"Computing influences for index {idx}...", end=' ')
             s = time.time()
             s_test = compute_s_test(test_inputs=inputs, params_filter=params_filter,
-                                    weight_decay_ignores=weight_decay_ignores, dataset_len=dataset_len, client=client)
-            results[idx] = get_influences(params_filter, weight_decay_ignores, s_test, dataset_len, client)
+                                    weight_decay_ignores=weight_decay_ignores, dataset_len=dataset_len, client=client,
+                                    num_workers=args.workers)
+            results[idx] = get_influences(params_filter, weight_decay_ignores, s_test, closest_indices=closest_indices,
+                                          client=client, workers=args.workers)
             print(f"Took {time.time() - s} seconds")
             # save results so far
             with open(RESULTS_FILE_PATH, "wb") as f:
@@ -249,5 +319,29 @@ def main():
                 # TODO We could do nearest neighbor later
 
 
+def get_closest(embedding: np.ndarray, train_dataset: 'Dataset', num_neighbours: int,
+                faiss_index: Optional[faiss_utils.FAISSIndex] = None) -> Iterable[int]:
+    """
+    Get indices for the `num_neighbours` closest example.
+
+    Args:
+        embedding: Array that represents the features.
+        train_dataset: Training dataset to search in.
+        num_neighbours: Number of neighbours to return, -1 means no KNN used.
+        faiss_index: FAISSIndex object to perform KNN.
+
+    Returns:
+        List of indices from the train dataset.
+    """
+    if num_neighbours == -1:
+        return np.arange(len(train_dataset))
+
+    assert faiss_index is not None, "If k != -1, faiss_index must be supplied!"
+    _, KNN_indices = faiss_index.search(
+        k=num_neighbours, queries=embedding)
+    return KNN_indices[0]
+
+
 if __name__ == '__main__':
-    main()
+    args = parse_args()
+    main(args)
